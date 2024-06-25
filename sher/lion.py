@@ -92,7 +92,7 @@ class Lion(Optimizer):
 
     def _rank(self, update, a, c):
         abs_x = torch.abs(update)
-        ranks = torch.argsort(torch.argsort(abs_x, descending=True))
+        ranks = torch.argsort(torch.argsort(abs_x, descending=True)).cuda()
         return c[ranks].mul_(torch.sign(update))
         
     @torch.no_grad()
@@ -135,24 +135,24 @@ class Lion(Optimizer):
                     p.add_(self._lsm(update, a), alpha=-group["lr"])
                 if reduction == 'sorting-norm-exp-decay':
                     a = group["a"]
-                    c = torch.exp(-a*torch.arange(torch.numel(update)))
+                    c = torch.exp(-a*torch.arange(torch.numel(update))).cuda()
                     p.add_(self._rank(update, a, c), alpha=-group["lr"])
                 if reduction == 'sorting-norm-sigmoid-decay':
                     a = group["a"]
-                    c = torch.exp(-torch.arange(torch.numel(update)).add(a)).add_(1.0).pow(-1)
+                    c = torch.exp(-torch.arange(torch.numel(update)).add(a)).add_(1.0).pow(-1).cuda()
                     p.add_(self._rank(update, a, c), alpha=-group["lr"])
                 if reduction == 'sorting-norm-softmax-decay':
                     a = group["a"]
-                    c = F.softmax(torch.arange(torch.numel(update)).float().mul_(-a), dim = 0)
+                    c = F.softmax(torch.arange(torch.numel(update)).float().mul_(-a), dim = 0).cuda()
                     p.add_(self._rank(update, a, c), alpha=-group["lr"])
                 if reduction == 'sorting-norm-cosine-decay':
                     a = group["a"]
                     d = torch.numel(update)
-                    c = torch.cos(torch.arange(d).mul(PI/2*d)).mul(a)
+                    c = torch.cos(torch.arange(d).mul(PI/2*d)).mul(a).cuda()
                     p.add_(self._rank(update, a, c), alpha=-group["lr"])
                 if reduction == 'abs-max':
                     a = group["a"]
-                    c = F.one_hot(torch.tensor([0]), num_classes=torch.numel(update)).float().squeeze().mul_(a)
+                    c = F.one_hot(torch.tensor([0]), num_classes=torch.numel(update)).float().squeeze().mul_(a).cuda()
                     p.add_(self._rank(update, a, c), alpha=-group["lr"])
                 
                 else:

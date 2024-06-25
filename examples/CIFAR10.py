@@ -1,4 +1,5 @@
 import torch
+from torch import optim
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
@@ -6,6 +7,7 @@ from torchvision import datasets, transforms, utils
 from utils import add_sher_to_path, tuple_type, truncated_type, update_config_from_args
 from dataclasses import dataclass
 import argparse
+from ResNet import Bottleneck, ResNet, ResNet50
 Lion, Betas2, Truncated, _ = add_sher_to_path()
 
 @dataclass
@@ -25,7 +27,7 @@ class Config:
     log_interval: int = 10
 
 
-class Net(nn.Module):
+class CNN(nn.Module):
     def __init__(self):
         super().__init__()
         self.conv1 = nn.Conv2d(3, 6, 5)
@@ -69,7 +71,7 @@ def train(conf, model, device, train_loader, optimizer, epoch, writer):
             )
 
 
-def test(conf, model, device, test_loader, epoch, writer):
+def test(conf, model, device, test_loader, epoch, scheduler, writer):
     model.eval()
     test_loss = 0
     correct = 0
@@ -82,6 +84,7 @@ def test(conf, model, device, test_loader, epoch, writer):
             correct += pred.eq(target.view_as(pred)).sum().item()
 
     test_loss /= len(test_loader.dataset)
+    scheduler.step(test_loss)
     fmt = "\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n"
     print(
         fmt.format(
@@ -148,16 +151,19 @@ def main():
     args = parse_args()
     conf = Config()
     update_config_from_args(conf, args)
-    log_dir = "runs/CIFAR10_Lion-K"
+    log_dir = "runs/CIFAR10-cos-decay-a=1.2-lr=5e-6"
     print("Tensorboard: tensorboard --logdir={}".format(log_dir))
 
     with SummaryWriter(log_dir) as writer:
         use_cuda = not conf.no_cuda and torch.cuda.is_available()
         torch.manual_seed(conf.seed)
-        device = torch.device("cuda" if use_cuda else "cpu")
+        #device = torch.device("cuda" if use_cuda else "cpu")
+        device = torch.device("cuda")
+        print("running on: ", device)
         train_loader, test_loader = prepare_loaders(conf, use_cuda)
-
-        model = Net().to(device)
+        
+        #model = Net().to(device)
+        model = ResNet50(10).to(device)
         
         images, labels = next(iter(train_loader))
         img_grid = utils.make_grid(images)
@@ -165,10 +171,17 @@ def main():
 
         optimizer = Lion(model.parameters(), lr=conf.lr, betas=conf.betas, reduction=conf.reduction,
                         theta=conf.theta, truncated=conf.truncated, weight_decay=conf.weight_decay, a=conf.a)
+        #optimizer = optim.AdamW(model.parameters(), lr = 1e-3, weight_decay = conf.weight_decay)
+        scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=conf.epochs)
+        scaler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3)
+
+
+        
         
         for epoch in range(1, conf.epochs + 1):
             train(conf, model, device, train_loader, optimizer, epoch, writer)
-            test(conf, model, device, test_loader, epoch, writer)
+            test(conf, model, device, test_loader, epoch, scaler, writer)
+            scheduler.step()
             for name, param in model.named_parameters():
                 writer.add_histogram(name, param, epoch)
                 writer.add_histogram("{}.grad".format(name), param.grad, epoch)
